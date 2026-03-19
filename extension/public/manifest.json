@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "公众号违规留言检测",
+  "version": "0.1.0",
+  "description": "检测微信公众号文章留言中的违规内容",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": [
+    "https://mp.weixin.qq.com/*",
+    "http://localhost:8080/*"
+  ],
+  "background": {
+    "service_worker": "background/index.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "违规留言检测"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mp.weixin.qq.com/cgi-bin/appmsg*"],
+      "js": ["articleList/index.js"]
+    }
+  ]
+}
