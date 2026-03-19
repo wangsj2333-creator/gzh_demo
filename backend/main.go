@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
+
+	"gzh_demo/backend/handler"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -20,7 +22,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func main() {
 	mux := http.NewServeMux()
-	// routes will be added in Task 2
+	mux.HandleFunc("/api/analyze", handler.Analyze)
 
 	log.Println("Backend running on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", corsMiddleware(mux)); err != nil {
