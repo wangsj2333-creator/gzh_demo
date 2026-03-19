@@ -14,7 +14,7 @@ export default defineConfig({
         comments: resolve(__dirname, 'src/content/comments.ts'),
       },
       output: {
-        entryFileNames: (chunk) => {
+        entryFileNames: (_chunk) => {
           return '[name]/index.js'
         },
         chunkFileNames: 'chunks/[name]-[hash].js',
