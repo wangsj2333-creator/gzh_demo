@@ -14,29 +14,13 @@ chrome.runtime.onMessage.addListener(
 function extractArticles(): ArticleInfo[] {
   const results: ArticleInfo[] = []
 
-  const pageUrl = new URL(window.location.href)
-  const token = pageUrl.searchParams.get('token') ?? ''
+  const items = document.querySelectorAll('.article-list__item-title')
 
-  const rows = document.querySelectorAll('.weui-desktop-mass-appmsg__bd')
+  items.forEach((item, i) => {
+    const articleTitle = item.textContent?.trim() ?? `文章${i + 1}`
+    const articleId = `art_${i}`
 
-  rows.forEach((row, i) => {
-    const titleEl = row.querySelector('.weui-desktop-mass-appmsg__title') as HTMLElement | null
-    const articleTitle = titleEl?.textContent?.trim() ?? `文章${i + 1}`
-
-    const links = Array.from(row.querySelectorAll('a')) as HTMLAnchorElement[]
-    const copyrightLink = links.find(a => a.href.includes('/cgi-bin/appmsgcopyright'))
-    if (!copyrightLink) return
-
-    const linkUrl = new URL(copyrightLink.href)
-    const articleId = linkUrl.searchParams.get('id')
-    const idx = linkUrl.searchParams.get('idx') ?? '1'
-    if (!articleId) return
-
-    const commentPageUrl =
-      `https://mp.weixin.qq.com/cgi-bin/appmsg_comment?action=browser` +
-      `&appmsgid=${articleId}&idx=${idx}&token=${token}&lang=zh_CN`
-
-    results.push({ articleId, articleTitle, commentPageUrl })
+    results.push({ articleId, articleTitle })
   })
 
   return results

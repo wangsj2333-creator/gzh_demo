@@ -2,7 +2,7 @@
 export interface ArticleInfo {
   articleId: string        // 从留言页 URL query param 中提取（如 ?appmsgid=xxx）
   articleTitle: string     // 文章标题
-  commentPageUrl: string   // 留言管理页完整 URL
+  commentPageUrl?: string  // 留言管理页完整 URL（留言页模式下不使用）
 }
 
 // 单条留言
@@ -17,7 +17,7 @@ export interface Comment {
 export interface ArticleComments {
   articleId: string
   articleTitle: string
-  commentPageUrl: string
+  commentPageUrl?: string
   comments: Comment[]
 }
 
@@ -60,6 +60,18 @@ export interface CommentsDataMessage {
   comments: Comment[]
 }
 
+// Background → Content Script：触发抓取
+export interface ExtractCommentsMessage {
+  type: 'extractComments'
+  articles: ArticleInfo[]
+}
+
+// Content Script → Background：全部抓取完毕
+export interface AllCommentsDataMessage {
+  type: 'allCommentsData'
+  articles: ArticleComments[]
+}
+
 // Background → Popup：检测进度
 export interface ProgressMessage {
   type: 'progress'
@@ -88,6 +100,8 @@ export type ExtMessage =
   | GetArticleListMessage
   | ArticleListMessage
   | CommentsDataMessage
+  | ExtractCommentsMessage
+  | AllCommentsDataMessage
   | ProgressMessage
   | ShowResultsMessage
   | ErrorMessage

@@ -12,6 +12,7 @@ export default defineConfig({
         background: resolve(__dirname, 'src/background/index.ts'),
         articleList: resolve(__dirname, 'src/content/articleList.ts'),
         comments: resolve(__dirname, 'src/content/comments.ts'),
+        interceptor: resolve(__dirname, 'src/content/interceptor.ts'),
       },
       output: {
         entryFileNames: (_chunk) => {

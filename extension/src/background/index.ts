@@ -1,7 +1,7 @@
 import type {
   StartDetectMessage,
   ArticleListMessage,
-  CommentsDataMessage,
+  AllCommentsDataMessage,
   ArticleComments,
   AnalysisResult,
   ExtMessage,
@@ -18,7 +18,7 @@ chrome.runtime.onConnect.addListener((port) => {
   }
 })
 
-chrome.runtime.onMessage.addListener((message: ExtMessage) => {
+chrome.runtime.onMessage.addListener((message: ExtMessage, _sender) => {
   if (message.type === 'fetchArticleList') {
     handleFetchArticleList().catch(err => {
       sendToPopup({ type: 'error', message: err.message, fatal: true })
@@ -27,14 +27,22 @@ chrome.runtime.onMessage.addListener((message: ExtMessage) => {
     handleStartDetect(message as StartDetectMessage).catch(err => {
       sendToPopup({ type: 'error', message: err.message, fatal: true })
     })
+  } else if (message.type === 'progress') {
+    sendToPopup(message)
+  } else if (message.type === 'error') {
+    sendToPopup(message)
+  } else if (message.type === 'allCommentsData') {
+    handleAllCommentsData(message as AllCommentsDataMessage).catch(err => {
+      sendToPopup({ type: 'error', message: err.message, fatal: true })
+    })
   }
   return false
 })
 
 async function handleFetchArticleList(): Promise<void> {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-  if (!activeTab?.id || !activeTab.url?.includes('mp.weixin.qq.com/cgi-bin/appmsg')) {
-    sendToPopup({ type: 'error', message: '请先打开微信公众平台发表记录页面', fatal: true })
+  if (!activeTab?.id || !activeTab.url?.includes('mp.weixin.qq.com/misc/appmsgcomment')) {
+    sendToPopup({ type: 'error', message: '请先打开互动管理-留言页面', fatal: true })
     return
   }
 
@@ -56,55 +64,21 @@ async function handleStartDetect(message: StartDetectMessage): Promise<void> {
     return
   }
 
-  const collectedArticles: ArticleComments[] = []
-
-  for (let i = 0; i < articles.length; i++) {
-    const art = articles[i]
-    sendToPopup({
-      type: 'progress',
-      current: i + 1,
-      total: articles.length,
-      articleTitle: art.articleTitle,
-    })
-
-    let tab: chrome.tabs.Tab | null = null
-    try {
-      tab = await chrome.tabs.create({ url: art.commentPageUrl, active: false })
-      const tabId = tab.id!
-
-      await waitForTabLoad(tabId)
-
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['comments/index.js'],
-      })
-
-      const commentsData = await waitForCommentsData(tabId, 10000)
-
-      collectedArticles.push({
-        articleId: art.articleId,
-        articleTitle: art.articleTitle,
-        commentPageUrl: art.commentPageUrl,
-        comments: commentsData.comments,
-      })
-    } catch (err) {
-      collectedArticles.push({
-        articleId: art.articleId,
-        articleTitle: art.articleTitle,
-        commentPageUrl: art.commentPageUrl,
-        comments: [],
-      })
-      sendToPopup({
-        type: 'error',
-        message: `《${art.articleTitle}》加载失败，已跳过`,
-        fatal: false,
-      })
-    } finally {
-      if (tab?.id) {
-        chrome.tabs.remove(tab.id).catch(() => {})
-      }
-    }
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!activeTab?.id) {
+    sendToPopup({ type: 'error', message: '无法获取当前标签页', fatal: true })
+    return
   }
+
+  try {
+    await chrome.tabs.sendMessage(activeTab.id, { type: 'extractComments', articles })
+  } catch {
+    sendToPopup({ type: 'error', message: '无法向留言页发送指令，请刷新页面后重试', fatal: true })
+  }
+}
+
+async function handleAllCommentsData(message: AllCommentsDataMessage): Promise<void> {
+  const collectedArticles: ArticleComments[] = message.articles
 
   let results: AnalysisResult[] = []
   try {
@@ -132,40 +106,4 @@ function sendToPopup(message: ExtMessage): void {
       // Popup 已关闭，忽略
     }
   }
-}
-
-function waitForTabLoad(tabId: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onUpdated)
-      reject(new Error('Tab 加载超时'))
-    }, 15000)
-
-    function onUpdated(id: number, info: chrome.tabs.TabChangeInfo) {
-      if (id === tabId && info.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(onUpdated)
-        clearTimeout(timeout)
-        resolve()
-      }
-    }
-    chrome.tabs.onUpdated.addListener(onUpdated)
-  })
-}
-
-function waitForCommentsData(tabId: number, timeoutMs: number): Promise<CommentsDataMessage> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      chrome.runtime.onMessage.removeListener(listener)
-      reject(new Error('等待留言数据超时'))
-    }, timeoutMs)
-
-    function listener(message: ExtMessage, sender: chrome.runtime.MessageSender) {
-      if (message.type === 'commentsData' && sender.tab?.id === tabId) {
-        chrome.runtime.onMessage.removeListener(listener)
-        clearTimeout(timeout)
-        resolve(message as CommentsDataMessage)
-      }
-    }
-    chrome.runtime.onMessage.addListener(listener)
-  })
 }

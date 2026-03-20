@@ -17,8 +17,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://mp.weixin.qq.com/cgi-bin/appmsg*"],
-      "js": ["articleList/index.js"]
+      "matches": ["https://mp.weixin.qq.com/misc/appmsgcomment*"],
+      "js": ["articleList/index.js", "comments/index.js"]
+    },
+    {
+      "matches": ["https://mp.weixin.qq.com/misc/appmsgcomment*"],
+      "js": ["interceptor/index.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ]
 }
