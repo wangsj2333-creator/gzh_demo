@@ -76,11 +76,18 @@ async function processArticles(articles: ExtractCommentsMessage['articles']): Pr
   chrome.runtime.sendMessage(doneMsg)
 }
 
+interface RawReply {
+  nick_name?: string
+  content?: string
+  create_time?: number
+}
+
 interface RawComment {
   nick_name?: string
   content?: string
   post_time?: number
   comment_id?: string
+  new_reply?: { reply_list: RawReply[]; reply_total_cnt?: number }
 }
 
 interface RawCommentList {
@@ -101,14 +108,25 @@ function parseComments(articleId: string, data: unknown): Comment[] {
     const parsed: RawCommentList = JSON.parse(resp.comment_list)
     const rawComments = parsed.comment ?? []
 
-    return rawComments.map((c, index) => ({
-      id: `${articleId}_${index}`,
-      author: c.nick_name ?? '未知用户',
-      content: c.content ?? '',
-      timestamp: c.post_time
-        ? new Date(c.post_time * 1000).toLocaleString('zh-CN')
-        : '',
-    }))
+    const results: Comment[] = []
+    for (const [index, c] of rawComments.entries()) {
+      results.push({
+        id: `${articleId}_${index}`,
+        author: c.nick_name ?? '未知用户',
+        content: c.content ?? '',
+        timestamp: c.post_time ? new Date(c.post_time * 1000).toLocaleString('zh-CN') : '',
+      })
+      const replies: RawReply[] = c.new_reply?.reply_list ?? []
+      replies.forEach((r, ri) => {
+        results.push({
+          id: `${articleId}_${index}_reply_${ri}`,
+          author: r.nick_name ?? '未知用户',
+          content: `↳ ${r.content ?? ''}`,
+          timestamp: r.create_time ? new Date(r.create_time * 1000).toLocaleString('zh-CN') : '',
+        })
+      })
+    }
+    return results
   } catch {
     return []
   }
