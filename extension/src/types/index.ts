@@ -21,11 +21,6 @@ export interface ArticleComments {
   comments: Comment[]
 }
 
-// 检测配置
-export interface DetectionConfig {
-  n: number  // 检测篇数，范围 1–10，默认 3
-}
-
 // 单条违规结果
 export interface AnalysisResult {
   commentId: string
@@ -36,27 +31,36 @@ export interface AnalysisResult {
 
 // ===== 消息协议类型 =====
 
+// Popup → Background：请求获取文章列表（用于展示选择界面）
+export interface FetchArticleListMessage {
+  type: 'fetchArticleList'
+}
+
+// Popup → Background：开始检测，携带用户选中的文章
 export interface StartDetectMessage {
   type: 'startDetect'
-  n: number
+  articles: ArticleInfo[]
 }
 
+// Background → Content Script：获取文章列表
 export interface GetArticleListMessage {
   type: 'getArticleList'
-  n: number
 }
 
+// Content Script → Background (sendResponse)：文章列表结果
 export interface ArticleListMessage {
   type: 'articleList'
   articles: ArticleInfo[]
 }
 
+// Content Script → Background (sendMessage)：留言数据
 export interface CommentsDataMessage {
   type: 'commentsData'
   articleId: string
   comments: Comment[]
 }
 
+// Background → Popup：检测进度
 export interface ProgressMessage {
   type: 'progress'
   current: number
@@ -64,12 +68,14 @@ export interface ProgressMessage {
   articleTitle: string
 }
 
+// Background → Popup：检测完成，返回结果
 export interface ShowResultsMessage {
   type: 'showResults'
   articles: ArticleComments[]
   results: AnalysisResult[]
 }
 
+// Background → Popup：错误通知
 export interface ErrorMessage {
   type: 'error'
   message: string
@@ -77,6 +83,7 @@ export interface ErrorMessage {
 }
 
 export type ExtMessage =
+  | FetchArticleListMessage
   | StartDetectMessage
   | GetArticleListMessage
   | ArticleListMessage

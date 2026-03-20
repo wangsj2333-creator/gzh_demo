@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type {
+  ArticleInfo,
   ArticleComments,
   AnalysisResult,
   ExtMessage,
 } from '../types'
 
 type State =
-  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'selecting'; articles: ArticleInfo[]; selected: Set<string> }
   | { status: 'detecting'; current: number; total: number; articleTitle: string; warnings: string[] }
   | { status: 'done'; articles: ArticleComments[]; results: AnalysisResult[] }
   | { status: 'error'; message: string }
 
 export default function App() {
-  const [n, setN] = useState(3)
-  const [state, setState] = useState<State>({ status: 'idle' })
+  const [state, setState] = useState<State>({ status: 'loading' })
   const portRef = useRef<chrome.runtime.Port | null>(null)
 
   useEffect(() => {
@@ -21,7 +22,10 @@ export default function App() {
     portRef.current = port
 
     port.onMessage.addListener((message: ExtMessage) => {
-      if (message.type === 'progress') {
+      if (message.type === 'articleList') {
+        const selected = new Set(message.articles.map(a => a.articleId))
+        setState({ status: 'selecting', articles: message.articles, selected })
+      } else if (message.type === 'progress') {
         setState(prev => ({
           status: 'detecting',
           current: message.current,
@@ -43,12 +47,42 @@ export default function App() {
       }
     })
 
+    // 打开 popup 后立即拉取文章列表
+    chrome.runtime.sendMessage({ type: 'fetchArticleList' })
+
     return () => port.disconnect()
   }, [])
 
+  function toggleArticle(articleId: string) {
+    setState(prev => {
+      if (prev.status !== 'selecting') return prev
+      const selected = new Set(prev.selected)
+      if (selected.has(articleId)) selected.delete(articleId)
+      else selected.add(articleId)
+      return { ...prev, selected }
+    })
+  }
+
+  function toggleAll() {
+    setState(prev => {
+      if (prev.status !== 'selecting') return prev
+      const allSelected = prev.selected.size === prev.articles.length
+      const selected = allSelected
+        ? new Set<string>()
+        : new Set(prev.articles.map(a => a.articleId))
+      return { ...prev, selected }
+    })
+  }
+
   function startDetect() {
-    setState({ status: 'detecting', current: 0, total: n, articleTitle: '准备中...', warnings: [] })
-    chrome.runtime.sendMessage({ type: 'startDetect', n })
+    if (state.status !== 'selecting') return
+    const selectedArticles = state.articles.filter(a => state.selected.has(a.articleId))
+    chrome.runtime.sendMessage({ type: 'startDetect', articles: selectedArticles })
+  }
+
+  function reset() {
+    setState({ status: 'loading' })
+    chrome.runtime.sendMessage({ type: 'fetchArticleList' })
   }
 
   const violations = state.status === 'done'
@@ -59,46 +93,79 @@ export default function App() {
     <div style={{ padding: 16, fontFamily: 'sans-serif', width: 400 }}>
       <h2 style={{ margin: '0 0 12px', fontSize: 16 }}>公众号违规留言检测</h2>
 
-      {/* 配置区 */}
-      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <label style={{ fontSize: 14 }}>检测篇数：</label>
-        <input
-          type="number"
-          min={1}
-          max={10}
-          value={n}
-          onChange={e => setN(Math.min(10, Math.max(1, Number(e.target.value))))}
-          style={{ width: 50, padding: '2px 4px' }}
-          disabled={state.status === 'detecting'}
-        />
-        <span style={{ fontSize: 12, color: '#666' }}>篇（最新，1–10）</span>
-      </div>
+      {/* 加载中 */}
+      {state.status === 'loading' && (
+        <div style={{ fontSize: 13, color: '#888' }}>正在读取文章列表...</div>
+      )}
 
-      {/* 触发按钮 */}
-      <button
-        onClick={startDetect}
-        disabled={state.status === 'detecting'}
-        style={{
-          padding: '6px 16px',
-          background: state.status === 'detecting' ? '#ccc' : '#07c160',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 4,
-          cursor: state.status === 'detecting' ? 'not-allowed' : 'pointer',
-          marginBottom: 12,
-          fontSize: 14,
-        }}
-      >
-        {state.status === 'detecting' ? '检测中...' : '开始检测'}
-      </button>
+      {/* 文章选择 */}
+      {state.status === 'selecting' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, color: '#555' }}>
+              共 {state.articles.length} 篇，已选 {state.selected.size} 篇
+            </span>
+            <button
+              onClick={toggleAll}
+              style={{ fontSize: 12, padding: '2px 8px', cursor: 'pointer' }}
+            >
+              {state.selected.size === state.articles.length ? '取消全选' : '全选'}
+            </button>
+          </div>
 
-      {/* 进度 */}
+          <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid #eee', borderRadius: 4, marginBottom: 12 }}>
+            {state.articles.map((art, i) => (
+              <label
+                key={art.articleId}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '7px 10px',
+                  cursor: 'pointer',
+                  borderBottom: i < state.articles.length - 1 ? '1px solid #f0f0f0' : 'none',
+                  background: state.selected.has(art.articleId) ? '#f0faf4' : '#fff',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={state.selected.has(art.articleId)}
+                  onChange={() => toggleArticle(art.articleId)}
+                  style={{ flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: '#333', lineHeight: 1.4 }}>
+                  {art.articleTitle}
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <button
+            onClick={startDetect}
+            disabled={state.selected.size === 0}
+            style={{
+              padding: '7px 20px',
+              background: state.selected.size === 0 ? '#ccc' : '#07c160',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              cursor: state.selected.size === 0 ? 'not-allowed' : 'pointer',
+              fontSize: 14,
+              width: '100%',
+            }}
+          >
+            开始检测（{state.selected.size} 篇）
+          </button>
+        </>
+      )}
+
+      {/* 检测进度 */}
       {state.status === 'detecting' && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 13, color: '#555', marginBottom: 4 }}>
+        <div>
+          <div style={{ fontSize: 13, color: '#555', marginBottom: 6 }}>
             正在处理第 {state.current}/{state.total} 篇：{state.articleTitle}
           </div>
-          <div style={{ background: '#eee', borderRadius: 4, height: 6 }}>
+          <div style={{ background: '#eee', borderRadius: 4, height: 6, marginBottom: 8 }}>
             <div style={{
               width: `${state.total > 0 ? (state.current / state.total) * 100 : 0}%`,
               background: '#07c160', height: '100%', borderRadius: 4, transition: 'width 0.3s',
@@ -112,13 +179,24 @@ export default function App() {
 
       {/* 致命错误 */}
       {state.status === 'error' && (
-        <div style={{ color: 'red', fontSize: 13, marginBottom: 12 }}>⚠️ {state.message}</div>
+        <div>
+          <div style={{ color: 'red', fontSize: 13, marginBottom: 10 }}>⚠️ {state.message}</div>
+          <button onClick={reset} style={{ fontSize: 13, padding: '4px 12px', cursor: 'pointer' }}>
+            重试
+          </button>
+        </div>
       )}
 
       {/* 结果区 */}
       {state.status === 'done' && (
         <>
-          <hr style={{ margin: '12px 0', borderColor: '#eee' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, color: '#555' }}>检测完成</span>
+            <button onClick={reset} style={{ fontSize: 12, padding: '2px 8px', cursor: 'pointer' }}>
+              重新选择
+            </button>
+          </div>
+          <hr style={{ margin: '0 0 12px', borderColor: '#eee' }} />
 
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>📄 全部留言</h3>

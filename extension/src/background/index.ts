@@ -9,7 +9,6 @@ import type {
 
 const BACKEND_URL = 'http://localhost:8080/api/analyze'
 
-// 使用 Port 连接 Popup，支持流式推送进度和结果
 let popupPort: chrome.runtime.Port | null = null
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -20,7 +19,11 @@ chrome.runtime.onConnect.addListener((port) => {
 })
 
 chrome.runtime.onMessage.addListener((message: ExtMessage) => {
-  if (message.type === 'startDetect') {
+  if (message.type === 'fetchArticleList') {
+    handleFetchArticleList().catch(err => {
+      sendToPopup({ type: 'error', message: err.message, fatal: true })
+    })
+  } else if (message.type === 'startDetect') {
     handleStartDetect(message as StartDetectMessage).catch(err => {
       sendToPopup({ type: 'error', message: err.message, fatal: true })
     })
@@ -28,35 +31,31 @@ chrome.runtime.onMessage.addListener((message: ExtMessage) => {
   return false
 })
 
-async function handleStartDetect(message: StartDetectMessage): Promise<void> {
-  const { n } = message
-
-  // Step 1: 确认当前 Tab 是发表记录页
+async function handleFetchArticleList(): Promise<void> {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (!activeTab?.id || !activeTab.url?.includes('mp.weixin.qq.com/cgi-bin/appmsg')) {
     sendToPopup({ type: 'error', message: '请先打开微信公众平台发表记录页面', fatal: true })
     return
   }
 
-  // Step 2: 获取文章列表
-  let articleListResponse: ArticleListMessage
   try {
-    articleListResponse = await chrome.tabs.sendMessage(activeTab.id, {
-      type: 'getArticleList',
-      n,
-    }) as ArticleListMessage
+    const response = await chrome.tabs.sendMessage(
+      activeTab.id,
+      { type: 'getArticleList' }
+    ) as ArticleListMessage
+    sendToPopup(response)
   } catch {
     sendToPopup({ type: 'error', message: '无法读取文章列表，请刷新页面后重试', fatal: true })
-    return
   }
+}
 
-  const articles = articleListResponse.articles
+async function handleStartDetect(message: StartDetectMessage): Promise<void> {
+  const articles = message.articles
   if (articles.length === 0) {
-    sendToPopup({ type: 'error', message: '未找到文章，请确认当前在发表记录页面', fatal: true })
+    sendToPopup({ type: 'error', message: '请先选择要检测的文章', fatal: true })
     return
   }
 
-  // Step 3: 依次抓取每篇文章的留言
   const collectedArticles: ArticleComments[] = []
 
   for (let i = 0; i < articles.length; i++) {
@@ -75,7 +74,6 @@ async function handleStartDetect(message: StartDetectMessage): Promise<void> {
 
       await waitForTabLoad(tabId)
 
-      // 注入 comment content script（路径相对于插件根目录 dist/）
       await chrome.scripting.executeScript({
         target: { tabId },
         files: ['comments/index.js'],
@@ -90,7 +88,6 @@ async function handleStartDetect(message: StartDetectMessage): Promise<void> {
         comments: commentsData.comments,
       })
     } catch (err) {
-      // 单篇失败不中止整体流程，记录空留言并通知用户
       collectedArticles.push({
         articleId: art.articleId,
         articleTitle: art.articleTitle,
@@ -99,7 +96,7 @@ async function handleStartDetect(message: StartDetectMessage): Promise<void> {
       })
       sendToPopup({
         type: 'error',
-        message: `第 ${i + 1} 篇文章（${art.articleTitle}）加载失败，已跳过`,
+        message: `《${art.articleTitle}》加载失败，已跳过`,
         fatal: false,
       })
     } finally {
@@ -109,7 +106,6 @@ async function handleStartDetect(message: StartDetectMessage): Promise<void> {
     }
   }
 
-  // Step 4: 发送到后端分析
   let results: AnalysisResult[] = []
   try {
     const resp = await fetch(BACKEND_URL, {
