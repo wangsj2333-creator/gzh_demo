@@ -5,8 +5,23 @@ function dispatch(data: unknown): void {
   window.dispatchEvent(new CustomEvent('__wx_comment_data__', { detail: data }))
 }
 
+interface RawReplyItem {
+  [key: string]: unknown
+}
+
+interface RawCommentEntry {
+  content_id?: string
+  new_reply?: {
+    reply_list?: RawReplyItem[]
+    reply_total_cnt?: number
+    max_reply_id?: number
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
 interface RawCommentPage {
-  comment?: unknown[]
+  comment?: RawCommentEntry[]
   total_count?: number
 }
 
@@ -14,10 +29,67 @@ interface RawApiResponse {
   comment_list?: string
 }
 
+interface GetCommentReplyResponse {
+  reply_list?: {
+    max_reply_id?: number
+    reply_list?: RawReplyItem[]
+  }
+}
+
+function buildReplyUrl(listUrl: string, contentId: string, maxReplyId: number): string {
+  const qsStart = listUrl.indexOf('?')
+  const qs = qsStart >= 0 ? listUrl.slice(qsStart + 1) : ''
+  const params = new URLSearchParams(qs)
+  const basePath = listUrl.split('?')[0]
+  const replyParams = new URLSearchParams({
+    action: 'get_comment_reply',
+    comment_id: params.get('comment_id') ?? '',
+    content_id: contentId,
+    limit: '20',
+    max_reply_id: String(maxReplyId),
+    clear_unread: '0',
+    fingerprint: params.get('fingerprint') ?? '',
+    token: params.get('token') ?? '',
+    lang: 'zh_CN',
+    f: 'json',
+    ajax: '1',
+  })
+  return `${basePath}?${replyParams.toString()}`
+}
+
+async function fetchAllReplies(
+  listUrl: string,
+  contentId: string,
+  initialMaxReplyId: number,
+): Promise<RawReplyItem[]> {
+  const allReplies: RawReplyItem[] = []
+  let maxReplyId = initialMaxReplyId
+
+  for (;;) {
+    try {
+      const replyUrl = buildReplyUrl(listUrl, contentId, maxReplyId)
+      const resp = await _originalFetch(replyUrl)
+      if (!resp.ok) break
+      const data = await resp.json() as GetCommentReplyResponse
+      const batch = data.reply_list?.reply_list ?? []
+      if (batch.length === 0) break
+      allReplies.push(...batch)
+      const minId = data.reply_list?.max_reply_id ?? 0
+      if (minId <= 0) break
+      maxReplyId = minId
+    } catch {
+      break
+    }
+  }
+
+  // API returns newest-first; reverse to chronological order
+  return allReplies.reverse()
+}
+
 async function fetchAllPages(firstData: RawApiResponse, url: string): Promise<void> {
   try {
     const parsedList: RawCommentPage = JSON.parse(firstData.comment_list ?? '{}')
-    const allComments = [...(parsedList.comment ?? [])]
+    const allComments: RawCommentEntry[] = [...(parsedList.comment ?? [])]
     const total: number = parsedList.total_count ?? 0
 
     for (let begin = 20; begin < total; begin += 20) {
@@ -32,9 +104,28 @@ async function fetchAllPages(firstData: RawApiResponse, url: string): Promise<vo
       }
     }
 
+    // Fetch complete reply lists for comments with truncated replies
+    const enrichedComments = await Promise.all(
+      allComments.map(async (c) => {
+        const totalReplies = c.new_reply?.reply_total_cnt ?? 0
+        const shownReplies = c.new_reply?.reply_list?.length ?? 0
+        const maxReplyId = c.new_reply?.max_reply_id ?? 0
+        const contentId = c.content_id ?? ''
+
+        if (totalReplies > shownReplies && maxReplyId > 0 && contentId) {
+          const fullReplies = await fetchAllReplies(url, contentId, maxReplyId)
+          return {
+            ...c,
+            new_reply: { ...(c.new_reply ?? {}), reply_list: fullReplies },
+          }
+        }
+        return c
+      })
+    )
+
     dispatch({
       ...firstData,
-      comment_list: JSON.stringify({ ...parsedList, comment: allComments }),
+      comment_list: JSON.stringify({ ...parsedList, comment: enrichedComments }),
     })
   } catch {
     // Fallback: dispatch first page as-is
