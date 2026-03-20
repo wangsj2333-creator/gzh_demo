@@ -12,7 +12,7 @@ import (
 
 const (
 	tongyiAPIURL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-	tongyiAPIKey = "" // TODO: 填入通义千问 API Key
+	tongyiAPIKey = "sk-8be540f8808e4c66a8e58d9befd2edde"
 	batchSize    = 50
 )
 
@@ -109,20 +109,16 @@ func callTongyi(prompt string) (string, error) {
 
 	var result struct {
 		Output struct {
-			Choices []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			} `json:"choices"`
+			Text string `json:"text"`
 		} `json:"output"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
 	}
-	if len(result.Output.Choices) == 0 {
+	if result.Output.Text == "" {
 		return "", errors.New("empty response from tongyi")
 	}
-	return result.Output.Choices[0].Message.Content, nil
+	return result.Output.Text, nil
 }
 
 type aiItem struct {
