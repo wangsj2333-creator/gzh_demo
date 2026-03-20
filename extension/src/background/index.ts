@@ -2,12 +2,8 @@ import type {
   StartDetectMessage,
   ArticleListMessage,
   AllCommentsDataMessage,
-  ArticleComments,
-  AnalysisResult,
   ExtMessage,
 } from '../types'
-
-const BACKEND_URL = 'http://localhost:8080/api/analyze'
 
 let popupPort: chrome.runtime.Port | null = null
 
@@ -60,7 +56,7 @@ async function handleFetchArticleList(): Promise<void> {
 async function handleStartDetect(message: StartDetectMessage): Promise<void> {
   const articles = message.articles
   if (articles.length === 0) {
-    sendToPopup({ type: 'error', message: '请先选择要检测的文章', fatal: true })
+    sendToPopup({ type: 'error', message: '请先选择要抓取的文章', fatal: true })
     return
   }
 
@@ -78,24 +74,9 @@ async function handleStartDetect(message: StartDetectMessage): Promise<void> {
 }
 
 async function handleAllCommentsData(message: AllCommentsDataMessage): Promise<void> {
-  const collectedArticles: ArticleComments[] = message.articles
-
-  let results: AnalysisResult[] = []
-  try {
-    const resp = await fetch(BACKEND_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ articles: collectedArticles }),
-    })
-    if (!resp.ok) throw new Error(`后端返回错误 ${resp.status}`)
-    const data = await resp.json()
-    results = data.results ?? []
-  } catch {
-    sendToPopup({ type: 'error', message: '无法连接本地服务，请确认后端已启动（localhost:8080）', fatal: true })
-    return
-  }
-
-  sendToPopup({ type: 'showResults', articles: collectedArticles, results })
+  await chrome.storage.local.set({ commentResults: message.articles })
+  await chrome.tabs.create({ url: chrome.runtime.getURL('results.html') })
+  sendToPopup({ type: 'showResults', articles: message.articles })
 }
 
 function sendToPopup(message: ExtMessage): void {

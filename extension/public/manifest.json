@@ -1,19 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "公众号违规留言检测",
+  "name": "公众号留言抓取",
   "version": "0.1.0",
-  "description": "检测微信公众号文章留言中的违规内容",
-  "permissions": ["tabs", "scripting"],
+  "description": "抓取微信公众号文章留言，含已屏蔽评论",
+  "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
-    "https://mp.weixin.qq.com/*",
-    "http://localhost:8080/*"
+    "https://mp.weixin.qq.com/*"
   ],
   "background": {
     "service_worker": "background/index.js"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "违规留言检测"
+    "default_title": "留言抓取"
   },
   "content_scripts": [
     {

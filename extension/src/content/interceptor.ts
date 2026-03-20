@@ -5,6 +5,21 @@ function dispatch(data: unknown): void {
   window.dispatchEvent(new CustomEvent('__wx_comment_data__', { detail: data }))
 }
 
+function dispatchBlocked(data: unknown): void {
+  window.dispatchEvent(new CustomEvent('__wx_blocked_comment_data__', { detail: data }))
+}
+
+function buildBlockedUrl(url: string): string {
+  const qsStart = url.indexOf('?')
+  const basePath = url.split('?')[0]
+  const qs = qsStart >= 0 ? url.slice(qsStart + 1) : ''
+  const params = new URLSearchParams(qs)
+  params.set('type', '4')
+  params.set('begin', '0')
+  params.set('max_id', '0')
+  return `${basePath}?${params.toString()}`
+}
+
 interface RawReplyItem {
   [key: string]: unknown
 }
@@ -86,7 +101,12 @@ async function fetchAllReplies(
   return allReplies.reverse()
 }
 
-async function fetchAllPages(firstData: RawApiResponse, url: string): Promise<void> {
+async function fetchPagesForUrl(
+  firstData: RawApiResponse,
+  url: string,
+  dispatchFn: (data: unknown) => void,
+  fetchReplies: boolean = true,
+): Promise<void> {
   try {
     const parsedList: RawCommentPage = JSON.parse(firstData.comment_list ?? '{}')
     const allComments: RawCommentEntry[] = [...(parsedList.comment ?? [])]
@@ -104,32 +124,36 @@ async function fetchAllPages(firstData: RawApiResponse, url: string): Promise<vo
       }
     }
 
-    // Fetch complete reply lists for comments with truncated replies
-    const enrichedComments = await Promise.all(
-      allComments.map(async (c) => {
-        const totalReplies = c.new_reply?.reply_total_cnt ?? 0
-        const shownReplies = c.new_reply?.reply_list?.length ?? 0
-        const maxReplyId = c.new_reply?.max_reply_id ?? 0
-        const contentId = c.content_id ?? ''
+    let enrichedComments = allComments
 
-        if (totalReplies > shownReplies && maxReplyId > 0 && contentId) {
-          const fullReplies = await fetchAllReplies(url, contentId, maxReplyId)
-          return {
-            ...c,
-            new_reply: { ...(c.new_reply ?? {}), reply_list: fullReplies },
+    if (fetchReplies) {
+      // Fetch complete reply lists for comments with truncated replies
+      enrichedComments = await Promise.all(
+        allComments.map(async (c) => {
+          const totalReplies = c.new_reply?.reply_total_cnt ?? 0
+          const shownReplies = c.new_reply?.reply_list?.length ?? 0
+          const maxReplyId = c.new_reply?.max_reply_id ?? 0
+          const contentId = c.content_id ?? ''
+
+          if (totalReplies > shownReplies && maxReplyId > 0 && contentId) {
+            const fullReplies = await fetchAllReplies(url, contentId, maxReplyId)
+            return {
+              ...c,
+              new_reply: { ...(c.new_reply ?? {}), reply_list: fullReplies },
+            }
           }
-        }
-        return c
-      })
-    )
+          return c
+        })
+      )
+    }
 
-    dispatch({
+    dispatchFn({
       ...firstData,
       comment_list: JSON.stringify({ ...parsedList, comment: enrichedComments }),
     })
   } catch {
     // Fallback: dispatch first page as-is
-    dispatch(firstData)
+    dispatchFn(firstData)
   }
 }
 
@@ -142,7 +166,16 @@ window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Pr
   if (url.includes('action=list_comment')) {
     const response = await _originalFetch(input, init)
     const clone = response.clone()
-    clone.json().then((data: RawApiResponse) => fetchAllPages(data, url)).catch(() => {})
+    clone.json().then((data: RawApiResponse) => {
+      fetchPagesForUrl(data, url, dispatch, true).catch(() => {})
+      const blockedUrl = buildBlockedUrl(url)
+      _originalFetch(blockedUrl)
+        .then(r => r.json())
+        .then((blockedData: RawApiResponse) =>
+          fetchPagesForUrl(blockedData, blockedUrl, dispatchBlocked, false)
+        )
+        .catch(() => {})
+    }).catch(() => {})
     return response
   }
 
@@ -172,7 +205,14 @@ XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyIn
     this.addEventListener('load', function () {
       try {
         const data: RawApiResponse = JSON.parse(this.responseText)
-        fetchAllPages(data, capturedUrl).catch(() => {})
+        fetchPagesForUrl(data, capturedUrl, dispatch, true).catch(() => {})
+        const blockedUrl = buildBlockedUrl(capturedUrl)
+        _originalFetch(blockedUrl)
+          .then(r => r.json())
+          .then((blockedData: RawApiResponse) =>
+            fetchPagesForUrl(blockedData, blockedUrl, dispatchBlocked, false)
+          )
+          .catch(() => {})
       } catch {
         // ignore parse errors
       }

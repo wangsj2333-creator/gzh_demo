@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type {
   ArticleInfo,
-  ArticleComments,
-  AnalysisResult,
   ExtMessage,
 } from '../types'
 
@@ -10,7 +8,7 @@ type State =
   | { status: 'loading' }
   | { status: 'selecting'; articles: ArticleInfo[]; selected: Set<string> }
   | { status: 'detecting'; current: number; total: number; articleTitle: string; warnings: string[] }
-  | { status: 'done'; articles: ArticleComments[]; results: AnalysisResult[] }
+  | { status: 'done' }
   | { status: 'error'; message: string }
 
 export default function App() {
@@ -34,7 +32,7 @@ export default function App() {
           warnings: prev.status === 'detecting' ? prev.warnings : [],
         }))
       } else if (message.type === 'showResults') {
-        setState({ status: 'done', articles: message.articles, results: message.results })
+        setState({ status: 'done' })
       } else if (message.type === 'error') {
         if (message.fatal) {
           setState({ status: 'error', message: message.message })
@@ -85,13 +83,9 @@ export default function App() {
     chrome.runtime.sendMessage({ type: 'fetchArticleList' })
   }
 
-  const violations = state.status === 'done'
-    ? state.results.filter(r => r.isViolation)
-    : []
-
   return (
     <div style={{ padding: 16, fontFamily: 'sans-serif', width: 400 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 16 }}>公众号违规留言检测</h2>
+      <h2 style={{ margin: '0 0 12px', fontSize: 16 }}>公众号留言抓取</h2>
 
       {/* 加载中 */}
       {state.status === 'loading' && (
@@ -154,12 +148,12 @@ export default function App() {
               width: '100%',
             }}
           >
-            开始检测（{state.selected.size} 篇）
+            开始抓取（{state.selected.size} 篇）
           </button>
         </>
       )}
 
-      {/* 检测进度 */}
+      {/* 抓取进度 */}
       {state.status === 'detecting' && (
         <div>
           <div style={{ fontSize: 13, color: '#555', marginBottom: 6 }}>
@@ -187,63 +181,18 @@ export default function App() {
         </div>
       )}
 
-      {/* 结果区 */}
+      {/* 抓取完成 */}
       {state.status === 'done' && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: '#555' }}>检测完成</span>
-            <button onClick={reset} style={{ fontSize: 12, padding: '2px 8px', cursor: 'pointer' }}>
-              重新选择
-            </button>
-          </div>
-          <hr style={{ margin: '0 0 12px', borderColor: '#eee' }} />
-
-          <div style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>📄 全部留言</h3>
-            {state.articles.map(art => (
-              <details key={art.articleId} style={{ marginBottom: 6 }}>
-                <summary style={{ cursor: 'pointer', fontSize: 13 }}>
-                  《{art.articleTitle}》（{art.comments.length} 条）
-                </summary>
-                <div style={{ paddingLeft: 12, marginTop: 4 }}>
-                  {art.comments.length === 0
-                    ? <div style={{ fontSize: 12, color: '#999' }}>无留言</div>
-                    : art.comments.map(c => (
-                      <div key={c.id} style={{ fontSize: 12, marginBottom: 4, color: '#333' }}>
-                        <strong>{c.author}：</strong>{c.content}
-                      </div>
-                    ))
-                  }
-                </div>
-              </details>
-            ))}
-          </div>
-
-          <div>
-            <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>
-              ⚠️ 违规留言（{violations.length} 条）
-            </h3>
-            {violations.length === 0
-              ? <div style={{ fontSize: 13, color: '#07c160' }}>✅ 未发现违规留言</div>
-              : violations.map(v => {
-                const article = state.articles.find(a => a.articleId === v.articleId)
-                const comment = article?.comments.find(c => c.id === v.commentId)
-                return (
-                  <div key={v.commentId} style={{
-                    background: '#fff3f3', borderRadius: 4, padding: 8, marginBottom: 6, fontSize: 13,
-                  }}>
-                    <div>
-                      <strong>{comment?.author ?? '未知'}</strong>
-                      （《{article?.articleTitle ?? ''}》）
-                    </div>
-                    <div style={{ color: '#555', margin: '2px 0' }}>{comment?.content}</div>
-                    <div style={{ color: '#e53935', fontSize: 12 }}>原因：{v.reason}</div>
-                  </div>
-                )
-              })
-            }
-          </div>
-        </>
+        <div>
+          <div style={{ fontSize: 14, color: '#07c160', marginBottom: 8 }}>✅ 抓取完成</div>
+          <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>结果已在新标签页展示</div>
+          <button
+            onClick={reset}
+            style={{ fontSize: 13, padding: '4px 12px', cursor: 'pointer' }}
+          >
+            重新选择
+          </button>
+        </div>
       )}
     </div>
   )

@@ -11,6 +11,7 @@ export interface Comment {
   author: string    // 用户昵称
   content: string   // 留言内容
   timestamp: string // 发布时间
+  isBlocked: boolean // 是否已屏蔽
 }
 
 // 文章及其留言（汇总结构）
@@ -19,14 +20,6 @@ export interface ArticleComments {
   articleTitle: string
   commentPageUrl?: string
   comments: Comment[]
-}
-
-// 单条违规结果
-export interface AnalysisResult {
-  commentId: string
-  articleId: string
-  isViolation: boolean
-  reason: string
 }
 
 // ===== 消息协议类型 =====
@@ -80,11 +73,10 @@ export interface ProgressMessage {
   articleTitle: string
 }
 
-// Background → Popup：检测完成，返回结果
+// Background → Popup：抓取完成
 export interface ShowResultsMessage {
   type: 'showResults'
   articles: ArticleComments[]
-  results: AnalysisResult[]
 }
 
 // Background → Popup：错误通知

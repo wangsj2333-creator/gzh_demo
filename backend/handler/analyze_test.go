@@ -34,9 +34,9 @@ func TestAnalyze_ValidRequest(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("invalid JSON response: %v", err)
 	}
-	// API Key 为空时 service 返回空数组，results 应为空 slice 而非 nil
-	if resp.Results == nil {
-		t.Fatal("results should be an empty slice, not nil")
+	// handler 直接透传 articles，应为非 nil slice
+	if resp.Articles == nil {
+		t.Fatal("articles should be a non-nil slice")
 	}
 }
 

@@ -24,14 +24,9 @@ async function processArticles(articles: ExtractCommentsMessage['articles']): Pr
     chrome.runtime.sendMessage(progressMsg)
 
     try {
-      // Set up the event listener BEFORE clicking, so we don't miss the response
-      const commentDataPromise = new Promise<unknown>((resolve) => {
-        const handler = (e: Event) => {
-          window.removeEventListener('__wx_comment_data__', handler)
-          resolve((e as CustomEvent).detail)
-        }
-        window.addEventListener('__wx_comment_data__', handler)
-      })
+      // Set up both event listeners BEFORE clicking, so we don't miss the responses
+      const normalPromise = waitForEvent('__wx_comment_data__')
+      const blockedPromise = waitForEvent('__wx_blocked_comment_data__')
 
       const titleEls = document.querySelectorAll('.article-list__item-title')
       let clicked = false
@@ -43,8 +38,9 @@ async function processArticles(articles: ExtractCommentsMessage['articles']): Pr
       })
 
       if (!clicked) {
-        // Clean up the dangling listener
+        // Clean up the dangling listeners
         window.dispatchEvent(new CustomEvent('__wx_comment_data__', { detail: null }))
+        window.dispatchEvent(new CustomEvent('__wx_blocked_comment_data__', { detail: null }))
 
         const errorMsg: ErrorMessage = {
           type: 'error',
@@ -56,10 +52,18 @@ async function processArticles(articles: ExtractCommentsMessage['articles']): Pr
         continue
       }
 
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
-      const data = await Promise.race([commentDataPromise, timeoutPromise])
+      const timeout = <T>(ms: number): Promise<T | null> =>
+        new Promise<T | null>(resolve => setTimeout(() => resolve(null), ms))
 
-      const comments = parseComments(art.articleId, data)
+      const [normalData, blockedData] = await Promise.all([
+        Promise.race([normalPromise, timeout(8000)]),
+        Promise.race([blockedPromise, timeout(8000)]),
+      ])
+
+      const comments = [
+        ...parseComments(art.articleId, normalData, false),
+        ...parseComments(art.articleId, blockedData, true),
+      ]
       collected.push({ articleId: art.articleId, articleTitle: art.articleTitle, comments })
     } catch {
       const errorMsg: ErrorMessage = {
@@ -74,6 +78,16 @@ async function processArticles(articles: ExtractCommentsMessage['articles']): Pr
 
   const doneMsg: AllCommentsDataMessage = { type: 'allCommentsData', articles: collected }
   chrome.runtime.sendMessage(doneMsg)
+}
+
+function waitForEvent(eventName: string): Promise<unknown> {
+  return new Promise<unknown>((resolve) => {
+    const handler = (e: Event) => {
+      window.removeEventListener(eventName, handler)
+      resolve((e as CustomEvent).detail)
+    }
+    window.addEventListener(eventName, handler)
+  })
 }
 
 interface RawReply {
@@ -98,7 +112,7 @@ interface RawApiResponse {
   comment_list?: string
 }
 
-function parseComments(articleId: string, data: unknown): Comment[] {
+function parseComments(articleId: string, data: unknown, isBlocked: boolean): Comment[] {
   if (!data) return []
 
   try {
@@ -111,18 +125,20 @@ function parseComments(articleId: string, data: unknown): Comment[] {
     const results: Comment[] = []
     for (const [index, c] of rawComments.entries()) {
       results.push({
-        id: `${articleId}_${index}`,
+        id: `${articleId}_${isBlocked ? 'b' : 'n'}_${index}`,
         author: c.nick_name ?? '未知用户',
         content: c.content ?? '',
         timestamp: c.post_time ? new Date(c.post_time * 1000).toLocaleString('zh-CN') : '',
+        isBlocked,
       })
       const replies: RawReply[] = c.new_reply?.reply_list ?? []
       replies.forEach((r, ri) => {
         results.push({
-          id: `${articleId}_${index}_reply_${ri}`,
+          id: `${articleId}_${isBlocked ? 'b' : 'n'}_${index}_reply_${ri}`,
           author: r.nick_name ?? '未知用户',
           content: `↳ ${r.content ?? ''}`,
           timestamp: r.create_time ? new Date(r.create_time * 1000).toLocaleString('zh-CN') : '',
+          isBlocked,
         })
       })
     }
